@@ -1,0 +1,62 @@
+pipeline {
+    agent any
+    environment {
+        SCANNER_HOME=tool 'sonar-scanner'
+    }
+    stages {
+        stage('git scm') {
+            agent {
+                label 'poori'
+            }
+            steps {
+                checkout scmGit(branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[credentialsId: 'git-cred', url: 'https://github.com/chaiithu/maven-web-app.git']])
+                stash 'source'
+            }
+           }
+           stage ('sonarqube analysis') {
+               agent {
+                   label'sonar'
+               }
+           steps{
+               unstash 'source'
+                script{
+                       withSonarQubeEnv('sonar-server') {
+                        sh """$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Tomcat \
+                        -Dsonar.projectKey=Tomcat"""
+                       }
+                }
+           }
+           }
+       stage ('quality gate') {
+    steps {
+          script {
+               waitForQualityGate abortpipeline: false, credentialsid: 'sonar-token'
+           }
+      }
+       }
+       stage ('build') {
+           agent {
+               label 'poori'
+           }
+       steps {
+           unstash 'source'
+           sh """mvn validate
+                 mvn compile
+                 mvn test 
+                 mvn package
+                 mvn clean
+                 mvn install
+                 """
+       }
+       
+    }
+    stage ('deployment') {
+        agent {
+            label 'poori'
+        }
+        steps {
+            deploy adapters: [tomcat9(credentialsId: 'tomcat-cred', path: '', url: 'http://43.205.0.102:8080')], contextPath: null, war: '**/*.war'
+        }
+    }
+    }
+}
